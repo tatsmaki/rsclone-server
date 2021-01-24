@@ -19,7 +19,7 @@ class WSServer {
 
     wss.on('connection', (ws, req) => {
       const websocket = ws;
-      this.onConnect(wss, websocket);
+      // this.onConnect(wss, websocket);
 
       websocket.on('close', () => {
         this.sendToEveryone(wss.clients, `{"gameDisconnectedMessage": "${websocket.token}", "chatServerMessage": "the user ${websocket.userName} has disconnected"}`);
@@ -35,13 +35,13 @@ class WSServer {
     });
   }
 
-  private onConnect(wss, ws) {
+  private onRegisterCommon(wss, ws, userName) {
     const websocket = ws;
     // websocket.wsToken = req.headers['sec-websocket-key'];
     websocket.token = this.getUserID(wss.clients);
-    websocket.userName = 'Guest';
+    websocket.userName = userName;
 
-    this.sendOnlyToYou(websocket, `{"setUserMount": "${wss.clients.size}", "setWsToken": "${websocket.token}", "setUserName": "Guest", "chatServerMessage": "You are connected"}`);
+    this.sendOnlyToYou(websocket, `{"setUserAsRegistered": "true", "setUserMount": "${wss.clients.size}", "setWsToken": "${websocket.token}", "setUserName": "${userName}", "chatServerMessage": "You are connected"}`);
     this.sendToAllButNotYou(websocket, wss.clients, `{"setUserMount": "${wss.clients.size}", "chatServerMessage": "User has connected"}`);
     this.sendToEveryone(wss.clients, `{"setNewWsToken": "${this.getWSTokensString(wss.clients)}"}`);
   }
@@ -55,11 +55,11 @@ class WSServer {
           const mess = JSON.parse(newWebsocketData);
           switch (mess.ask) {
             case 'register':
-              this.login(wss.clients, mess, websocket);
+              this.login(wss, mess, websocket);
               break;
 
             case 'loginThroughPass':
-              this.loginThroughPass(wss.clients, mess, websocket);
+              this.loginThroughPass(wss, mess, websocket);
               break;
 
             case 'setStat':
@@ -78,7 +78,7 @@ class WSServer {
     }
   }
 
-  private login(clients, mess, ws) {
+  private login(wss, mess, ws) {
     const websocket = ws;
     jwt.verify(
       mess.userToken,
@@ -90,12 +90,13 @@ class WSServer {
         if (payload) {
           const item = await pg.getById(payload.id);
           if (item) {
-            if (!this.isUserAlreadyRegistered(clients, payload.id)) {
+            if (!this.isUserAlreadyRegistered(wss.clients, payload.id)) {
+              this.onRegisterCommon(wss, ws, payload.login);
               websocket.isRegistered = true;
               websocket.id = payload.id;
-              websocket.userName = payload.login;
+              // websocket.userName = payload.login;
               const token = jwt.sign({ id: payload.id, login: payload.login }, appConfig.TOKEN_KEY, { expiresIn: '30d' });
-              websocket.send(`{"setUserName": "${payload.login}", "chatServerMessage": "you are registered as ${payload.login}!", "setToken": "${token}"}`);
+              websocket.send(`{"chatServerMessage": "you are registered as ${payload.login}!", "setToken": "${token}"}`);
               console.log('user was registered through token');
             } else {
               websocket.send('{"failLogin": "through token: The User is Already Registered"}');
@@ -108,7 +109,7 @@ class WSServer {
     );
   }
 
-  private async loginThroughPass(clients, mess, ws) {
+  private async loginThroughPass(wss, mess, ws) {
     const websocket = ws;
     if (mess.login && mess.password) {
       const item = await pg.getLogin(mess.login);
@@ -117,12 +118,13 @@ class WSServer {
           const { id } = item;
           const { login } = item;
           console.log(`id ${id}`);
-          if (!this.isUserAlreadyRegistered(clients, id)) {
+          if (!this.isUserAlreadyRegistered(wss.clients, id)) {
+            this.onRegisterCommon(wss, ws, mess.login);
             websocket.isRegistered = true;
             websocket.id = id;
-            websocket.userName = mess.login;
+            // websocket.userName = mess.login;
             const token = jwt.sign({ id, login }, appConfig.TOKEN_KEY, { expiresIn: '30d' });
-            websocket.send(`{"setUserName": "${mess.login}", "chatServerMessage": "you are registered as ${mess.login}!", "setToken": "${token}"}`);
+            websocket.send(`{"chatServerMessage": "you are registered as ${mess.login}!", "setToken": "${token}"}`);
             console.log('user was registered through password');
           } else {
             websocket.send('{"failLogin": "through password: The User is Already Registered"}');
