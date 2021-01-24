@@ -237,14 +237,41 @@
                 this.WS_TOKEN = '';
                 this.USER_NAME = '';
                 this.USER_TOKEN = userToken;
+                this.USER_MOUNT = '';
 
-                this.HOST = location.origin.replace(/^http/, 'ws');
+                // this.HOST = location.origin.replace(/^http/, 'ws');
+                // // this.HOST = 'ws://rs-clone-server.herokuapp.com/';
                 this.TEXTAREA_OBJ = document.getElementById('sock-msg');
             }
             init() {
-                document.cookie = 'X-Authorization=' + this.USER_TOKEN + '; path=/';
-
-                this.ws = new WebSocket(this.HOST);
+                
+                // const myHeaders =  new Headers()
+                
+                /**you need to get the token and put it in myToken var.
+                 Where to store the token is the real question, you need
+                 to take care about the storage you choose beacause of
+                 the security risks*/
+                 
+                //  myHeaders.append('Content-Type','application/json; charset=utf-8');
+                //  myHeaders.append('Authorization', 'Bearer ' + this.USER_TOKEN);
+                 
+                 // fetch( '/myurl', {
+                     //     credentials: 'include',
+                     //     headers: myHeaders,
+                     //     method: 'GET'
+                     // }).then( res => {
+                         
+                         //     return res.json();
+                         
+                         // }).then( res => {
+                             
+                             //     /**your stuff*/
+                             
+                             // });
+                // document.cookie = 'X-Authorization=' + this.USER_TOKEN + '; path=/';
+                // this.ws = new WebSocket(`ws://${this.USER_TOKEN}@127.0.0.1:3001/`);
+                // this.ws = new WebSocket('ws://127.0.0.1:3001', null, { "headers": myHeaders});
+                this.ws = new WebSocket(`wss://${HOST}`);//
                 this.ws.onopen = this.connectionOpen.bind(this); 
                 this.ws.onmessage = this.messageReceived.bind(this); 
                 this.ws.onerror = this.connectionError.bind(this);
@@ -283,12 +310,17 @@
             messageReceived(message) {
                 const mess = JSON.parse(message.data);
 
+ 
+                if (mess.setUserMount) {
+                    console.log('DOING SETTINGS USER MOUNT ' + mess.setUserMount);
+                    this.USER_MOUNT = mess.setUserMount;
+                }
                 if (mess.setUserName) {
                     console.log('DOING SETTINGS USER NAME ' + mess.setUserName);
                     this.USER_NAME = mess.setUserName;
                 }
                 if (mess.setWsToken) {
-                    console.log('DOING SETTINGS WS TOKEN ' + mess.setUserName);
+                    console.log('DOING SETTINGS WS TOKEN ' + mess.setWsToken);
                     this.WS_TOKEN = mess.setWsToken;
                 }
                 if (mess.chatMessage) {
@@ -319,15 +351,12 @@
         }
 
 
-
-
-
         function auth(login, password) {
             async function postData(url = '', data = {}) {
                 // Default options are marked with *
                 const response = await fetch(url, {
                     method: 'POST', // *GET, POST, PUT, DELETE, etc.
-                    mode: 'cors', // no-cors, *cors, same-origin
+                    mode: 'no-cors', // no-cors, *cors, same-origin
                     cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
                     credentials: 'same-origin', // include, *same-origin, omit
                     headers: {
@@ -338,16 +367,21 @@
                     referrerPolicy: 'no-referrer', // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
                     body: JSON.stringify(data) // body data type must match "Content-Type" header
                 });
-                return response.json(); // parses JSON response into native JavaScript objects
+                console.log(response);
+                return response.json; // parses JSON response into native JavaScript objects
             }
-            postData('https://rs-clone-server.herokuapp.com/auth/login', {login:login,password:password}).then(data => {
-            // postData('http://localhost:3001/auth/login', {login:login,password:password}).then(data => {
+            postData(`https://${HOST}/auth/login`, {login: login, password: password}).then(data => {
                     new MCWebSocket(data.token).init();
                     console.log(data.token);
                 });
         }
 
+
+        const LOCAL_MODE = false;
+        const HOST = LOCAL_MODE ? '127.0.0.1:3001' : 'rs-clone-server.herokuapp.com';
+
         auth("User1", "Admin123");
+        
     </script>
 </body>
 </html>

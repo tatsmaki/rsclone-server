@@ -1,12 +1,17 @@
 import { v4 as uuid } from 'uuid';
-import { Router } from 'express';
+// import { Router } from 'express';
+import * as express from 'express';
+import * as cors from 'cors';
 import * as jwt from 'jsonwebtoken';
 import * as bodyParser from 'body-parser';
 // import * as storage from '../storage/mongo';
 import * as pg from '../storage/postgre';
 import appConfig from '../app-config';
 
-const router = Router();
+const app = express();
+app.use(cors());
+
+const router = express.Router();
 
 router.use(bodyParser.json());
 

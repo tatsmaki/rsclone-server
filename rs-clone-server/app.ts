@@ -8,8 +8,8 @@ import playersRouter from './routes/players';
 const app = express();
 // const CORS_OPTIONS = {}; // {origin: 'http://example.com'};{msg: 'This is CORS-enabled for only example.com.'}
 
-app.use(logger('dev'));
 app.use(cors());
+app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use('/auth', authRouter);

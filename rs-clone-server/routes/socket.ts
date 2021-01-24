@@ -1,3 +1,4 @@
+/* eslint-disable class-methods-use-this */
 import { Server } from 'ws';
 import * as jwt from 'jsonwebtoken';
 import appConfig from '../app-config';
@@ -18,78 +19,179 @@ class WSServer {
 
     wss.on('connection', (ws, req) => {
       const websocket = ws;
-
-      // websocket.id = Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-
-      websocket.token = req.headers['sec-websocket-key'];
-
-      websocket.userName = 'Guest';
-
-      console.log(`client.token ${wss.clients.size}`);
-
-      wss.clients.forEach((client) => {
-        if (client.token === req.headers['sec-websocket-key']) {
-          const userToken = this.getCookie(req.headers.cookie);
-          if (!userToken) {
-            return;
-          }
-          jwt.verify(userToken, appConfig.TOKEN_KEY, async (err, payload: PayloadInterface) => {
-            if (payload) {
-              const item = await pg.getById(payload.id);
-              if (item) {
-                let isAlreadyRegistered = false;
-                wss.clients.forEach((clientInner) => {
-                  if (clientInner.id === payload.id) {
-                    // console.log('user already registered');
-                    isAlreadyRegistered = true;
-                  }
-                });
-                if (!isAlreadyRegistered) {
-                  // console.log('user was registered');
-                  websocket.isRegistered = true;
-                  websocket.id = payload.id;
-                  websocket.userName = payload.login;
-                  client.send(`{"setWsToken": "${client.token}", "setUserName": "${payload.login}", "chatServerMessage": "you are registered, ${payload.login}!"}`);
-                }
-              }
-            }
-          });
-
-          client.send(`{"setWsToken": "${client.token}", "setUserName": "Guest"}`);
-        }
-        client.send('{"chatServerMessage": "User has connected"}');
-      });
+      this.onConnect(wss, websocket);
 
       websocket.on('close', () => {
-        wss.clients.forEach((client) => {
-          client.send(`{"chatServerMessage": "the user ${websocket.userName} has disconnected"}`);
-        });
+        this.sendToEveryone(wss.clients, `{"gameDisconnectedMessage": "${websocket.token}", "chatServerMessage": "the user ${websocket.userName} has disconnected"}`);
       });
 
       websocket.on('message', (websocketData) => {
-        wss.clients.forEach((client) => {
-          if (client.token === websocket.token && client.isRegistered) {
-            // console.log('user can act as if is registered');
-          }
-          client.send(websocketData);
-        });
+        if (websocketData[0] !== '{') {
+          this.onMessageWithCode(wss, websocket, websocketData);
+          return;
+        }
+        this.sendToEveryone(wss.clients, websocketData);
       });
     });
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  private getCookie(cookie: any) {
-    let out = '';
-    cookie.split('; ').some((element) => {
-      const [first, sec] = element.split('=');
-      if (first === 'X-Authorization') {
-        out = sec;
-        return true;
+  private onConnect(wss, ws) {
+    const websocket = ws;
+    // websocket.wsToken = req.headers['sec-websocket-key'];
+    websocket.token = this.getUserID(wss.clients);
+    websocket.userName = 'Guest';
+
+    this.sendOnlyToYou(websocket, `{"setUserMount": "${wss.clients.size}", "setWsToken": "${websocket.token}", "setUserName": "Guest", "chatServerMessage": "You are connected"}`);
+    this.sendToAllButNotYou(websocket, wss.clients, `{"setUserMount": "${wss.clients.size}", "chatServerMessage": "User has connected"}`);
+    this.sendToEveryone(wss.clients, `{"setNewWsToken": "${this.getWSTokensString(wss.clients)}"}`);
+  }
+
+  private onMessageWithCode(wss, currSocketConnection, websocketData) {
+    const websocket = currSocketConnection;
+    const newWebsocketData = websocketData.substr(1);
+    switch (websocketData[0]) {
+      case '0':
+        try {
+          const mess = JSON.parse(newWebsocketData);
+          switch (mess.ask) {
+            case 'register':
+              this.login(wss.clients, mess, websocket);
+              break;
+
+            case 'loginThroughPass':
+              this.loginThroughPass(wss.clients, mess, websocket);
+              break;
+
+            case 'setStat':
+              break;
+
+            default: break;
+          }
+        } catch {
+          console.log(newWebsocketData);
+        }
+        break;
+      case '1':
+        this.sendToAllButNotYou(websocket, wss.clients, newWebsocketData);
+        break;
+      default: break;
+    }
+  }
+
+  private login(clients, mess, ws) {
+    const websocket = ws;
+    jwt.verify(
+      mess.userToken,
+      appConfig.TOKEN_KEY,
+      async (err, payload: PayloadInterface) => {
+        if (err) {
+          websocket.send(`{"failLogin": "TOKEN: ${err}"}`);
+        }
+        if (payload) {
+          const item = await pg.getById(payload.id);
+          if (item) {
+            if (!this.isUserAlreadyRegistered(clients, payload.id)) {
+              websocket.isRegistered = true;
+              websocket.id = payload.id;
+              websocket.userName = payload.login;
+              const token = jwt.sign({ id: payload.id, login: payload.login }, appConfig.TOKEN_KEY, { expiresIn: '30d' });
+              websocket.send(`{"setUserName": "${payload.login}", "chatServerMessage": "you are registered as ${payload.login}!", "setToken": "${token}"}`);
+              console.log('user was registered through token');
+            } else {
+              websocket.send('{"failLogin": "through token: The User is Already Registered"}');
+            }
+          } else {
+            websocket.send('{"failLogin": "through token: login doesn\'t exist"}');
+          }
+        }
+      },
+    );
+  }
+
+  private async loginThroughPass(clients, mess, ws) {
+    const websocket = ws;
+    if (mess.login && mess.password) {
+      const item = await pg.getLogin(mess.login);
+      if (item) {
+        if (item.login === mess.login && item.password === mess.password) {
+          const { id } = item;
+          const { login } = item;
+          console.log(`id ${id}`);
+          if (!this.isUserAlreadyRegistered(clients, id)) {
+            websocket.isRegistered = true;
+            websocket.id = id;
+            websocket.userName = mess.login;
+            const token = jwt.sign({ id, login }, appConfig.TOKEN_KEY, { expiresIn: '30d' });
+            websocket.send(`{"setUserName": "${mess.login}", "chatServerMessage": "you are registered as ${mess.login}!", "setToken": "${token}"}`);
+            console.log('user was registered through password');
+          } else {
+            websocket.send('{"failLogin": "through password: The User is Already Registered"}');
+          }
+        } else {
+          websocket.send('{"failLogin": "through password: the login or the password doesn\'t exist"}');
+        }
+      } else {
+        websocket.send('{"failLogin": "through password: wrong login or password"}');
       }
-      return false;
+    }
+  }
+
+  private getUserID(clients) {
+    let UID = this.getUUID();
+    while (this.isUserIDExist(clients, UID)) {
+      UID = this.getUUID();
+    }
+    return UID;
+  }
+
+  private getUUID() {
+    return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+  }
+
+  private isUserIDExist(clients, id) {
+    let isExist = false;
+    clients.forEach((client) => {
+      if (client.token === id) {
+        isExist = true;
+      }
     });
-    return out;
+    return isExist;
+  }
+
+  private isUserAlreadyRegistered(clients, id) {
+    let isExist = false;
+    clients.forEach((client) => {
+      if (client.id === id) {
+        isExist = true;
+      }
+    });
+    return isExist;
+  }
+
+  private getWSTokensString(clients) {
+    const tokens = [];
+    clients.forEach((client) => {
+      tokens.push(client.token);
+    });
+    return tokens.join('___');
+  }
+
+  private sendOnlyToYou(websocket, string) {
+    websocket.send(string);
+  }
+
+  private sendToEveryone(clients, string) {
+    clients.forEach((client) => {
+      client.send(string);
+    });
+  }
+
+  private sendToAllButNotYou(websocket, clients, string) {
+    clients.forEach((client) => {
+      if (client.token !== websocket.token) {
+        client.send(string);
+      }
+    });
   }
 }
-
 export default WSServer;
